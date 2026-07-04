@@ -114,3 +114,21 @@ func TestGetFallbackModelsReturnsSettingsAndChannelSummaries(t *testing.T) {
 	require.Equal(t, []string{"default", "vip"}, payload.Data.Channels[0].Groups)
 	require.Equal(t, []string{"upstream-a", "upstream-b"}, payload.Data.Channels[0].Models)
 }
+
+func TestGetFallbackModelsReturnsEmptyModelArrayWhenStoredModelsAreNull(t *testing.T) {
+	setupModelListControllerTestDB(t)
+	withFallbackModelSettingsForController(t, model_setting.FallbackModelSettings{})
+
+	recorder := httptest.NewRecorder()
+	ctx, _ := gin.CreateTestContext(recorder)
+	ctx.Request = httptest.NewRequest(http.MethodGet, "/api/fallback_models", nil)
+
+	GetFallbackModels(ctx)
+
+	require.Equal(t, http.StatusOK, recorder.Code)
+	var payload fallbackModelsAPIResponse
+	require.NoError(t, common.Unmarshal(recorder.Body.Bytes(), &payload))
+	require.True(t, payload.Success)
+	require.NotNil(t, payload.Data.Models)
+	require.Empty(t, payload.Data.Models)
+}

@@ -60,7 +60,7 @@ func GetFallbackModels(c *gin.Context) {
 
 	settings := model_setting.GetFallbackModelSettings()
 	common.ApiSuccess(c, fallbackModelSettingsResponse{
-		Models:   append([]model_setting.FallbackModel(nil), settings.Models...),
+		Models:   append([]model_setting.FallbackModel{}, settings.Models...),
 		Channels: channels,
 	})
 }
