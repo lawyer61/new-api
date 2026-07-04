@@ -123,7 +123,7 @@ func fallbackResponseStarted(c *gin.Context, relayInfo *relaycommon.RelayInfo) b
 
 func isFallbackRelayFormatSupported(relayFormat types.RelayFormat) bool {
 	switch relayFormat {
-	case types.RelayFormatOpenAI, types.RelayFormatOpenAIResponses, types.RelayFormatClaude, types.RelayFormatGemini:
+	case types.RelayFormatOpenAI, types.RelayFormatOpenAIResponses, types.RelayFormatClaude, types.RelayFormatGemini, types.RelayFormatEmbedding:
 		return true
 	default:
 		return false

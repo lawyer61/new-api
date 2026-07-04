@@ -21,6 +21,7 @@ import { api } from '@/lib/api'
 import type {
   ConfirmPaymentComplianceResponse,
   FetchUpstreamRatiosRequest,
+  FallbackModelTestRequest,
   FallbackModelTestResponse,
   FallbackModelsResponse,
   LogCleanupTask,
@@ -124,10 +125,10 @@ export async function updateFallbackModels(
   return res.data
 }
 
-export async function testFallbackModel(model: string) {
+export async function testFallbackModel(request: FallbackModelTestRequest) {
   const res = await api.post<FallbackModelTestResponse>(
     '/api/fallback_models/test',
-    { model }
+    request
   )
   return res.data
 }

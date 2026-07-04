@@ -2,6 +2,7 @@ package controller
 
 import (
 	"context"
+	"fmt"
 	"net/http"
 	"strings"
 	"time"
@@ -30,7 +31,8 @@ type fallbackModelSettingsResponse struct {
 }
 
 type fallbackModelTestRequest struct {
-	Model string `json:"model"`
+	Model       string `json:"model"`
+	RelayFormat string `json:"relay_format"`
 }
 
 type fallbackModelTestAttemptResult struct {
@@ -133,7 +135,13 @@ func TestFallbackModel(c *gin.Context) {
 		return
 	}
 
-	result := testFallbackModelChain(c.Request.Context(), fallbackModel, testUserID)
+	testEndpointType, err := fallbackModelTestEndpointType(request.RelayFormat)
+	if err != nil {
+		common.ApiError(c, err)
+		return
+	}
+
+	result := testFallbackModelChain(c.Request.Context(), fallbackModel, testUserID, testEndpointType)
 	common.ApiSuccess(c, result)
 }
 
@@ -174,23 +182,44 @@ func normalizeFallbackModelStringList(values []string) []string {
 	return result
 }
 
-func testFallbackModelChain(ctx context.Context, fallbackModel model_setting.FallbackModel, testUserID int) fallbackModelTestResponse {
+func fallbackModelTestEndpointType(relayFormat string) (string, error) {
+	switch types.RelayFormat(strings.TrimSpace(relayFormat)) {
+	case "", types.RelayFormatOpenAI:
+		return string(constant.EndpointTypeOpenAI), nil
+	case types.RelayFormatEmbedding:
+		return string(constant.EndpointTypeEmbeddings), nil
+	default:
+		return "", fmt.Errorf("unsupported fallback test relay_format %q", relayFormat)
+	}
+}
+
+func fallbackModelTestRequestPath(endpointType string) string {
+	switch constant.EndpointType(endpointType) {
+	case constant.EndpointTypeEmbeddings:
+		return "/v1/embeddings"
+	default:
+		return "/v1/chat/completions"
+	}
+}
+
+func testFallbackModelChain(ctx context.Context, fallbackModel model_setting.FallbackModel, testUserID int, endpointType string) fallbackModelTestResponse {
 	response := fallbackModelTestResponse{
 		Model:    fallbackModel.Name,
 		Success:  false,
 		Attempts: []fallbackModelTestAttemptResult{},
 	}
 
+	requestPath := fallbackModelTestRequestPath(endpointType)
 	validAttempts := 0
 	for attemptIndex, attempt := range fallbackModel.Attempts {
-		resolved, ok := service.ResolveFallbackAttempt(attempt, "/v1/chat/completions")
+		resolved, ok := service.ResolveFallbackAttempt(attempt, requestPath)
 		if !ok {
 			continue
 		}
 		validAttempts++
 
 		start := time.Now()
-		testResult := testChannel(ctx, resolved.Channel, testUserID, resolved.Model, string(constant.EndpointTypeOpenAI), false)
+		testResult := testChannel(ctx, resolved.Channel, testUserID, resolved.Model, endpointType, false)
 		elapsed := float64(time.Since(start).Milliseconds()) / 1000.0
 
 		attemptResult := fallbackModelTestAttemptResult{

@@ -49,6 +49,7 @@ import type {
   FallbackModel,
   FallbackModelAttempt,
   FallbackModelChannel,
+  FallbackModelTestRelayFormat,
   FallbackModelTestResult,
 } from '../types'
 
@@ -129,6 +130,13 @@ function nextModelName(drafts: FallbackModelDraft[]) {
   let index = 2
   while (names.has(`auto-${index}`)) index += 1
   return `auto-${index}`
+}
+
+function testResultKey(
+  modelName: string,
+  relayFormat: FallbackModelTestRelayFormat
+) {
+  return `${relayFormat}:${modelName}`
 }
 
 type FallbackModelValidationError =
@@ -330,6 +338,9 @@ export function FallbackModelsSection() {
   const { t } = useTranslation()
   const queryClient = useQueryClient()
   const [drafts, setDrafts] = useState<FallbackModelDraft[]>([])
+  const [testRelayFormats, setTestRelayFormats] = useState<
+    Record<string, FallbackModelTestRelayFormat>
+  >({})
   const [testResults, setTestResults] = useState<
     Record<string, FallbackModelTestResult>
   >({})
@@ -369,14 +380,15 @@ export function FallbackModelsSection() {
 
   const testMutation = useMutation({
     mutationFn: testFallbackModel,
-    onSuccess: (data, modelName) => {
+    onSuccess: (data, request) => {
       if (!data.success) {
         toast.error(data.message || t('Real upstream test failed'))
         return
       }
       setTestResults((current) => ({
         ...current,
-        [data.data.model || modelName]: data.data,
+        [testResultKey(data.data.model || request.model, request.relay_format)]:
+          data.data,
       }))
       if (data.data.success) {
         toast.success(t('Real upstream test succeeded'))
@@ -468,8 +480,10 @@ export function FallbackModelsSection() {
         <div className='space-y-4'>
           {drafts.map((draft, modelIndex) => {
             const normalizedName = draft.name.trim()
+            const selectedRelayFormat =
+              testRelayFormats[draft.clientId] ?? 'openai'
             const lastResult = normalizedName
-              ? testResults[normalizedName]
+              ? testResults[testResultKey(normalizedName, selectedRelayFormat)]
               : undefined
 
             return (
@@ -509,6 +523,37 @@ export function FallbackModelsSection() {
                   </div>
 
                   <div className='flex flex-wrap items-end justify-end gap-2'>
+                    <div className='min-w-32 space-y-1.5'>
+                      <label className='text-muted-foreground text-xs font-medium'>
+                        {t('Mode')}
+                      </label>
+                      <Select
+                        value={selectedRelayFormat}
+                        onValueChange={(value) =>
+                          setTestRelayFormats((current) => ({
+                            ...current,
+                            [draft.clientId]:
+                              value as FallbackModelTestRelayFormat,
+                          }))
+                        }
+                      >
+                        <SelectTrigger size='sm' className='w-full'>
+                          <SelectValue>
+                            {selectedRelayFormat === 'embedding'
+                              ? t('Embeddings')
+                              : t('Text')}
+                          </SelectValue>
+                        </SelectTrigger>
+                        <SelectContent alignItemWithTrigger={false}>
+                          <SelectGroup>
+                            <SelectItem value='openai'>{t('Text')}</SelectItem>
+                            <SelectItem value='embedding'>
+                              {t('Embeddings')}
+                            </SelectItem>
+                          </SelectGroup>
+                        </SelectContent>
+                      </Select>
+                    </div>
                     <div className='flex h-8 items-center gap-2'>
                       <Switch
                         checked={draft.enabled}
@@ -523,7 +568,12 @@ export function FallbackModelsSection() {
                       variant='outline'
                       size='sm'
                       disabled={!normalizedName || testMutation.isPending}
-                      onClick={() => testMutation.mutate(normalizedName)}
+                      onClick={() =>
+                        testMutation.mutate({
+                          model: normalizedName,
+                          relay_format: selectedRelayFormat,
+                        })
+                      }
                     >
                       <Play data-icon='inline-start' />
                       <span>

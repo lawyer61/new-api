@@ -41,6 +41,8 @@ type testResult struct {
 	newAPIError *types.NewAPIError
 }
 
+const embeddingChannelTestInput = "new-api fallback embedding test"
+
 func normalizeChannelTestEndpoint(channel *model.Channel, modelName, endpointType string) string {
 	normalized := strings.TrimSpace(endpointType)
 	if normalized != "" {
@@ -702,7 +704,7 @@ func buildTestRequest(model string, endpointType string, channel *model.Channel,
 			// 返回 EmbeddingRequest
 			return &dto.EmbeddingRequest{
 				Model: model,
-				Input: []any{"hello world"},
+				Input: []any{embeddingChannelTestInput},
 			}
 		case constant.EndpointTypeImageGeneration:
 			// 返回 ImageRequest
@@ -774,7 +776,7 @@ func buildTestRequest(model string, endpointType string, channel *model.Channel,
 		// 返回 EmbeddingRequest
 		return &dto.EmbeddingRequest{
 			Model: model,
-			Input: []any{"hello world"},
+			Input: []any{embeddingChannelTestInput},
 		}
 	}
 

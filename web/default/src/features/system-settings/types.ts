@@ -481,6 +481,13 @@ export type UpdateFallbackModelsRequest = {
   models: FallbackModel[]
 }
 
+export type FallbackModelTestRelayFormat = 'openai' | 'embedding'
+
+export type FallbackModelTestRequest = {
+  model: string
+  relay_format: FallbackModelTestRelayFormat
+}
+
 export type FallbackModelTestAttempt = {
   index: number
   channel_id: number

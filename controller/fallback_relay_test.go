@@ -91,7 +91,7 @@ func TestRunFallbackRelayTriesConfiguredAttemptsUntilSuccess(t *testing.T) {
 
 func TestRunFallbackRelaySendsRealOpenAIRequestsThroughConfiguredAttempts(t *testing.T) {
 	db := setupModelListControllerTestDB(t)
-	require.NoError(t, db.AutoMigrate(&model.Log{}))
+	require.NoError(t, db.AutoMigrate(&model.Log{}, &model.Token{}))
 	service.InitHttpClient()
 
 	originalMemoryCacheEnabled := common.MemoryCacheEnabled
@@ -212,6 +212,139 @@ func TestRunFallbackRelaySendsRealOpenAIRequestsThroughConfiguredAttempts(t *tes
 	require.Len(t, requestsByChannel[2], 1)
 	require.Contains(t, requestsByChannel[1][0], `"model":"mapped-a"`)
 	require.Contains(t, requestsByChannel[2][0], `"model":"mapped-b"`)
+	require.Equal(t, []string{"1", "2"}, ctx.GetStringSlice("use_channel"))
+}
+
+func TestRunFallbackRelaySendsRealEmbeddingRequestsThroughConfiguredAttempts(t *testing.T) {
+	db := setupModelListControllerTestDB(t)
+	require.NoError(t, db.AutoMigrate(&model.Log{}, &model.Token{}))
+	service.InitHttpClient()
+
+	originalMemoryCacheEnabled := common.MemoryCacheEnabled
+	common.MemoryCacheEnabled = false
+	t.Cleanup(func() {
+		common.MemoryCacheEnabled = originalMemoryCacheEnabled
+	})
+
+	requestsByChannel := map[int][]string{}
+	firstServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		require.Equal(t, "/v1/embeddings", r.URL.Path)
+		body, err := io.ReadAll(r.Body)
+		require.NoError(t, err)
+		requestsByChannel[1] = append(requestsByChannel[1], string(body))
+		w.WriteHeader(http.StatusTooManyRequests)
+		_, _ = w.Write([]byte(`{"error":{"message":"first embedding failed","type":"rate_limit","code":"rate_limit"}}`))
+	}))
+	defer firstServer.Close()
+
+	secondServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		require.Equal(t, "/v1/embeddings", r.URL.Path)
+		body, err := io.ReadAll(r.Body)
+		require.NoError(t, err)
+		requestsByChannel[2] = append(requestsByChannel[2], string(body))
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{
+			"object": "list",
+			"data": [{"object": "embedding", "index": 0, "embedding": [0.1, 0.2, 0.3]}],
+			"model": "mapped-embedding-b",
+			"usage": {"prompt_tokens": 3, "total_tokens": 3}
+		}`))
+	}))
+	defer secondServer.Close()
+
+	mappingA := `{"embedding-public-a":"mapped-embedding-a"}`
+	mappingB := `{"embedding-public-b":"mapped-embedding-b"}`
+	insertFallbackRelayTestChannel(t, model.Channel{
+		Id:           1,
+		Type:         constant.ChannelTypeOpenAI,
+		Key:          "sk-first",
+		Status:       common.ChannelStatusEnabled,
+		Name:         "first",
+		Models:       "embedding-public-a",
+		Group:        "default",
+		BaseURL:      &firstServer.URL,
+		ModelMapping: &mappingA,
+	})
+	insertFallbackRelayTestChannel(t, model.Channel{
+		Id:           2,
+		Type:         constant.ChannelTypeOpenAI,
+		Key:          "sk-second",
+		Status:       common.ChannelStatusEnabled,
+		Name:         "second",
+		Models:       "embedding-public-b",
+		Group:        "default",
+		BaseURL:      &secondServer.URL,
+		ModelMapping: &mappingB,
+	})
+
+	recorder := httptest.NewRecorder()
+	ctx, _ := gin.CreateTestContext(recorder)
+	ctx.Request = httptest.NewRequest(http.MethodPost, "/v1/embeddings", strings.NewReader(`{"model":"auto-embedding","input":"ping"}`))
+	ctx.Request.Header.Set("Content-Type", "application/json")
+	common.SetContextKey(ctx, constant.ContextKeyRequestStartTime, time.Now())
+	common.SetContextKey(ctx, constant.ContextKeyOriginalModel, "auto-embedding")
+	common.SetContextKey(ctx, constant.ContextKeyUserId, 1001)
+	common.SetContextKey(ctx, constant.ContextKeyTokenId, 2001)
+	common.SetContextKey(ctx, constant.ContextKeyTokenGroup, "default")
+	common.SetContextKey(ctx, constant.ContextKeyUserGroup, "default")
+	common.SetContextKey(ctx, constant.ContextKeyUsingGroup, "default")
+	ctx.Set("token_name", "fallback-test")
+
+	info := &relaycommon.RelayInfo{
+		OriginModelName: "auto-embedding",
+		TokenGroup:      "default",
+		UsingGroup:      "default",
+		UserGroup:       "default",
+		UserId:          1001,
+		TokenId:         2001,
+		StartTime:       time.Now(),
+		RelayMode:       relayconstant.RelayModeEmbeddings,
+		RelayFormat:     types.RelayFormatEmbedding,
+		RequestURLPath:  "/v1/embeddings",
+		PriceData: types.PriceData{
+			ModelRatio:      1,
+			CompletionRatio: 1,
+			CacheRatio:      1,
+			GroupRatioInfo:  types.GroupRatioInfo{GroupRatio: 1},
+		},
+		Request: &dto.EmbeddingRequest{
+			Model: "auto-embedding",
+			Input: "ping",
+		},
+	}
+	info.InitRequestConversionChain()
+	fallbackModel := model_setting.FallbackModel{
+		Name:    "auto-embedding",
+		Enabled: true,
+		Groups:  []string{"default"},
+		Attempts: []model_setting.FallbackModelAttempt{
+			{ChannelID: 1, Model: "embedding-public-a"},
+			{ChannelID: 2, Model: "embedding-public-b"},
+		},
+	}
+
+	err := runFallbackRelay(ctx, info, fallbackModel, types.RelayFormatEmbedding, func(c *gin.Context, relayInfo *relaycommon.RelayInfo) *types.NewAPIError {
+		return relayByFormat(c, relayInfo, types.RelayFormatEmbedding, nil)
+	})
+
+	require.Nil(t, err)
+	require.Equal(t, http.StatusOK, recorder.Code)
+	require.Len(t, requestsByChannel[1], 1)
+	require.Len(t, requestsByChannel[2], 1)
+	require.Contains(t, requestsByChannel[1][0], `"model":"mapped-embedding-a"`)
+	require.Contains(t, requestsByChannel[2][0], `"model":"mapped-embedding-b"`)
+	var embeddingResponse struct {
+		Object string `json:"object"`
+		Data   []struct {
+			Object string `json:"object"`
+		} `json:"data"`
+		Model string `json:"model"`
+	}
+	require.NoError(t, common.Unmarshal(recorder.Body.Bytes(), &embeddingResponse))
+	require.Equal(t, "list", embeddingResponse.Object)
+	require.NotEmpty(t, embeddingResponse.Data)
+	require.Equal(t, "embedding", embeddingResponse.Data[0].Object)
+	require.Equal(t, "mapped-embedding-b", embeddingResponse.Model)
 	require.Equal(t, []string{"1", "2"}, ctx.GetStringSlice("use_channel"))
 }
 
