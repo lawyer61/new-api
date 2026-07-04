@@ -101,6 +101,15 @@ func Distribute() func(c *gin.Context) {
 					}
 				}
 
+				fallbackGroups := service.FallbackModelGroupsForUsingGroup(c, usingGroup)
+				if fallbackModel, found := service.GetFallbackModelForGroups(modelRequest.Model, fallbackGroups); found {
+					common.SetContextKey(c, constant.ContextKeyRequestStartTime, time.Now())
+					common.SetContextKey(c, constant.ContextKeyOriginalModel, modelRequest.Model)
+					service.SetFallbackModelContext(c, fallbackModel)
+					c.Next()
+					return
+				}
+
 				if preferredChannelID, found := service.GetPreferredChannelByAffinity(c, modelRequest.Model, usingGroup); found {
 					affinityUsable := false
 					preferred, err := model.CacheGetChannel(preferredChannelID)

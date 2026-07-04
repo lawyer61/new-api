@@ -236,7 +236,12 @@ func ListModels(c *gin.Context, modelType int) {
 		} else {
 			tokenModelLimit = map[string]bool{}
 		}
+		allFallbackNames := service.GetAllEnabledFallbackModelNames()
+		visibleFallbackNames := service.GetVisibleFallbackModelNames(ownerGroups)
 		for allowModel, _ := range tokenModelLimit {
+			if common.StringsContains(allFallbackNames, allowModel) && !common.StringsContains(visibleFallbackNames, allowModel) {
+				continue
+			}
 			if !acceptUnsetRatioModel {
 				if !helper.HasModelBillingConfig(allowModel) {
 					continue
@@ -258,6 +263,7 @@ func ListModels(c *gin.Context, modelType int) {
 		} else {
 			models = model.GetGroupEnabledModels(ownerGroups[0])
 		}
+		models = service.AppendVisibleFallbackModelNames(models, ownerGroups)
 		for _, modelName := range models {
 			if !acceptUnsetRatioModel {
 				if !helper.HasModelBillingConfig(modelName) {
@@ -271,6 +277,9 @@ func ListModels(c *gin.Context, modelType int) {
 	ownerByModel := map[string]string{}
 	if len(ownerGroups) > 0 {
 		ownerByModel = getPreferredModelOwners(userModelNames, ownerGroups)
+	}
+	for _, fallbackName := range service.GetVisibleFallbackModelNames(ownerGroups) {
+		ownerByModel[fallbackName] = "fallback"
 	}
 	userOpenAiModels := make([]dto.OpenAIModels, 0, len(userModelNames))
 	for _, modelName := range userModelNames {
@@ -330,9 +339,15 @@ func DashboardListModels(c *gin.Context) {
 }
 
 func EnabledListModels(c *gin.Context) {
+	models := model.GetEnabledModels()
+	for _, fallbackName := range service.GetAllEnabledFallbackModelNames() {
+		if !common.StringsContains(models, fallbackName) {
+			models = append(models, fallbackName)
+		}
+	}
 	c.JSON(200, gin.H{
 		"success": true,
-		"data":    model.GetEnabledModels(),
+		"data":    models,
 	})
 }
 
@@ -350,15 +365,35 @@ func RetrieveModel(c *gin.Context, modelType int) {
 		default:
 			c.JSON(200, aiModel)
 		}
-	} else {
-		openAIError := types.OpenAIError{
-			Message: fmt.Sprintf("The model '%s' does not exist", modelId),
-			Type:    "invalid_request_error",
-			Param:   "model",
-			Code:    "model_not_found",
-		}
-		c.JSON(200, gin.H{
-			"error": openAIError,
-		})
+		return
 	}
+
+	groups, err := getModelListGroups(c)
+	if err == nil {
+		if _, ok := service.GetFallbackModelForGroups(modelId, groups.ownerGroups); ok {
+			aiModel := buildOpenAIModel(modelId, map[string]string{modelId: "fallback"})
+			switch modelType {
+			case constant.ChannelTypeAnthropic:
+				c.JSON(200, dto.AnthropicModel{
+					ID:          aiModel.Id,
+					CreatedAt:   time.Unix(int64(aiModel.Created), 0).UTC().Format(time.RFC3339),
+					DisplayName: aiModel.Id,
+					Type:        "model",
+				})
+			default:
+				c.JSON(200, aiModel)
+			}
+			return
+		}
+	}
+
+	openAIError := types.OpenAIError{
+		Message: fmt.Sprintf("The model '%s' does not exist", modelId),
+		Type:    "invalid_request_error",
+		Param:   "model",
+		Code:    "model_not_found",
+	}
+	c.JSON(200, gin.H{
+		"error": openAIError,
+	})
 }

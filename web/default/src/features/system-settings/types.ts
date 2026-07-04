@@ -444,3 +444,63 @@ export type UpstreamRatiosResponse = {
     test_results: TestResult[]
   }
 }
+
+export type FallbackModelAttempt = {
+  channel_id: number
+  model: string
+}
+
+export type FallbackModel = {
+  name: string
+  enabled: boolean
+  groups: string[]
+  attempts: FallbackModelAttempt[]
+}
+
+export type FallbackModelChannel = {
+  id: number
+  name: string
+  type: number
+  status: number
+  groups: string[]
+  models: string[]
+}
+
+export type FallbackModelsData = {
+  models: FallbackModel[]
+  channels: FallbackModelChannel[]
+}
+
+export type FallbackModelsResponse = {
+  success: boolean
+  message: string
+  data: FallbackModelsData
+}
+
+export type UpdateFallbackModelsRequest = {
+  models: FallbackModel[]
+}
+
+export type FallbackModelTestAttempt = {
+  index: number
+  channel_id: number
+  channel_name: string
+  model: string
+  success: boolean
+  message: string
+  error_code?: string
+  time: number
+}
+
+export type FallbackModelTestResult = {
+  model: string
+  success: boolean
+  message: string
+  attempts: FallbackModelTestAttempt[]
+}
+
+export type FallbackModelTestResponse = {
+  success: boolean
+  message: string
+  data: FallbackModelTestResult
+}

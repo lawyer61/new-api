@@ -603,7 +603,7 @@ func GetUserModels(c *gin.Context) {
 		c.JSON(http.StatusOK, gin.H{
 			"success": true,
 			"message": "",
-			"data":    model.GetGroupEnabledModels(group),
+			"data":    service.AppendVisibleFallbackModelNames(model.GetGroupEnabledModels(group), []string{group}),
 		})
 		return
 	}
@@ -615,6 +615,9 @@ func GetUserModels(c *gin.Context) {
 				models = append(models, g)
 			}
 		}
+	}
+	for group := range groups {
+		models = service.AppendVisibleFallbackModelNames(models, []string{group})
 	}
 	c.JSON(http.StatusOK, gin.H{
 		"success": true,

@@ -19,8 +19,9 @@ func ModelMappedHelper(c *gin.Context, info *common.RelayInfo, request dto.Reque
 	}
 
 	isResponsesCompact := info.RelayMode == relayconstant.RelayModeResponsesCompact
-	originModelName := info.OriginModelName
-	mappingModelName := originModelName
+	routeModelName := info.RouteModelName()
+	originModelName := routeModelName
+	mappingModelName := routeModelName
 	if isResponsesCompact && strings.HasSuffix(originModelName, ratio_setting.CompactModelSuffix) {
 		mappingModelName = strings.TrimSuffix(originModelName, ratio_setting.CompactModelSuffix)
 	}
@@ -72,7 +73,11 @@ func ModelMappedHelper(c *gin.Context, info *common.RelayInfo, request dto.Reque
 			finalUpstreamModelName = info.UpstreamModelName
 		}
 		info.UpstreamModelName = finalUpstreamModelName
-		info.OriginModelName = ratio_setting.WithCompactModelSuffix(finalUpstreamModelName)
+		if info.FallbackAttemptModelName != "" {
+			info.FallbackAttemptModelName = ratio_setting.WithCompactModelSuffix(finalUpstreamModelName)
+		} else {
+			info.OriginModelName = ratio_setting.WithCompactModelSuffix(finalUpstreamModelName)
+		}
 	}
 	if request != nil {
 		request.SetModelName(info.UpstreamModelName)

@@ -38,3 +38,14 @@ func TestRelayInfoGetFinalRequestRelayFormatNilReceiver(t *testing.T) {
 	var info *RelayInfo
 	require.Equal(t, types.RelayFormat(""), info.GetFinalRequestRelayFormat())
 }
+
+func TestRelayInfoFallbackModelNames(t *testing.T) {
+	info := &RelayInfo{
+		OriginModelName:          "auto",
+		FallbackModelName:        "auto",
+		FallbackAttemptModelName: "gpt-4o-mini",
+	}
+
+	require.Equal(t, "auto", info.PublicModelName())
+	require.Equal(t, "gpt-4o-mini", info.RouteModelName())
+}

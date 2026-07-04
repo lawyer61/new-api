@@ -71,6 +71,9 @@ func GenerateTextOtherInfo(ctx *gin.Context, relayInfo *relaycommon.RelayInfo, m
 	}
 
 	AppendChannelAffinityAdminInfo(ctx, adminInfo)
+	if relayInfo.IsFallbackRouting() {
+		AppendFallbackModelAdminInfo(relayInfo.FallbackModelName, relayInfo.FallbackAttemptIndex, relayInfo.FallbackAttemptModelName, adminInfo)
+	}
 
 	other["admin_info"] = adminInfo
 	appendRequestPath(ctx, relayInfo, other)

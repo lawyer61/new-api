@@ -50,6 +50,7 @@ var auditRouteActions = map[string]string{
 	"POST /api/option/payment_compliance":       "option.payment_compliance",
 	"POST /api/option/rest_model_ratio":         "option.reset_ratio",
 	"DELETE /api/option/channel_affinity_cache": "option.clear_affinity_cache",
+	"PUT /api/fallback_models":                  "fallback_model.update",
 
 	// 自定义 OAuth（root）
 	"POST /api/custom-oauth-provider/":      "custom_oauth.create",

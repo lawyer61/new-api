@@ -21,10 +21,13 @@ import { api } from '@/lib/api'
 import type {
   ConfirmPaymentComplianceResponse,
   FetchUpstreamRatiosRequest,
+  FallbackModelTestResponse,
+  FallbackModelsResponse,
   LogCleanupTask,
   SystemOptionsResponse,
   SystemTaskListResponse,
   SystemTaskResponse,
+  UpdateFallbackModelsRequest,
   UpdateOptionRequest,
   UpdateOptionResponse,
   UpstreamChannelsResponse,
@@ -102,6 +105,29 @@ export async function fetchUpstreamRatios(request: FetchUpstreamRatiosRequest) {
   const res = await api.post<UpstreamRatiosResponse>(
     '/api/ratio_sync/fetch',
     request
+  )
+  return res.data
+}
+
+export async function getFallbackModels() {
+  const res = await api.get<FallbackModelsResponse>('/api/fallback_models')
+  return res.data
+}
+
+export async function updateFallbackModels(
+  request: UpdateFallbackModelsRequest
+) {
+  const res = await api.put<FallbackModelsResponse>(
+    '/api/fallback_models',
+    request
+  )
+  return res.data
+}
+
+export async function testFallbackModel(model: string) {
+  const res = await api.post<FallbackModelTestResponse>(
+    '/api/fallback_models/test',
+    { model }
   )
   return res.data
 }

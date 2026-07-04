@@ -225,6 +225,13 @@ func SetApiRouter(router *gin.Engine) {
 			ratioSyncRoute.GET("/channels", controller.GetSyncableChannels)
 			ratioSyncRoute.POST("/fetch", controller.FetchUpstreamRatios)
 		}
+		fallbackModelsRoute := apiRouter.Group("/fallback_models")
+		fallbackModelsRoute.Use(middleware.RootAuth())
+		{
+			fallbackModelsRoute.GET("", controller.GetFallbackModels)
+			fallbackModelsRoute.PUT("", controller.UpdateFallbackModels)
+			fallbackModelsRoute.POST("/test", controller.TestFallbackModel)
+		}
 		registerChannelRoutes(apiRouter)
 		registerAuthzRoutes(apiRouter)
 		tokenRoute := apiRouter.Group("/token")

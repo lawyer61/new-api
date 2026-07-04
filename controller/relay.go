@@ -65,6 +65,19 @@ func geminiRelayHandler(c *gin.Context, info *relaycommon.RelayInfo) *types.NewA
 	return err
 }
 
+func relayByFormat(c *gin.Context, info *relaycommon.RelayInfo, relayFormat types.RelayFormat, ws *websocket.Conn) *types.NewAPIError {
+	switch relayFormat {
+	case types.RelayFormatOpenAIRealtime:
+		return relay.WssHelper(c, info)
+	case types.RelayFormatClaude:
+		return relay.ClaudeHelper(c, info)
+	case types.RelayFormatGemini:
+		return geminiRelayHandler(c, info)
+	default:
+		return relayHandler(c, info)
+	}
+}
+
 func Relay(c *gin.Context, relayFormat types.RelayFormat) {
 
 	requestId := c.GetString(common.RequestIdKey)
@@ -178,6 +191,25 @@ func Relay(c *gin.Context, relayFormat types.RelayFormat) {
 		}
 	}()
 
+	if fallbackModel, ok := service.GetFallbackModelFromContext(c); ok {
+		relayInfo.RetryIndex = 0
+		relayInfo.LastError = nil
+		newAPIError = runFallbackRelay(c, relayInfo, fallbackModel, relayFormat, func(c *gin.Context, relayInfo *relaycommon.RelayInfo) *types.NewAPIError {
+			return relayByFormat(c, relayInfo, relayFormat, ws)
+		})
+		useChannel := c.GetStringSlice("use_channel")
+		if len(useChannel) > 1 {
+			retryLogStr := fmt.Sprintf("重试：%s", strings.Trim(strings.Join(strings.Fields(fmt.Sprint(useChannel)), "->"), "[]"))
+			logger.LogInfo(c, retryLogStr)
+		}
+		if newAPIError != nil {
+			gopool.Go(func() {
+				perfmetrics.RecordRelaySample(relayInfo, false, 0)
+			})
+		}
+		return
+	}
+
 	retryParam := &service.RetryParam{
 		Ctx:         c,
 		TokenGroup:  relayInfo.TokenGroup,
@@ -210,16 +242,7 @@ func Relay(c *gin.Context, relayFormat types.RelayFormat) {
 		}
 		c.Request.Body = io.NopCloser(bodyStorage)
 
-		switch relayFormat {
-		case types.RelayFormatOpenAIRealtime:
-			newAPIError = relay.WssHelper(c, relayInfo)
-		case types.RelayFormatClaude:
-			newAPIError = relay.ClaudeHelper(c, relayInfo)
-		case types.RelayFormatGemini:
-			newAPIError = geminiRelayHandler(c, relayInfo)
-		default:
-			newAPIError = relayHandler(c, relayInfo)
-		}
+		newAPIError = relayByFormat(c, relayInfo, relayFormat, ws)
 
 		if newAPIError == nil {
 			relayInfo.LastError = nil
@@ -369,6 +392,9 @@ func processChannelError(c *gin.Context, channelError types.ChannelError, err *t
 		userId := c.GetInt("id")
 		tokenName := c.GetString("token_name")
 		modelName := c.GetString("original_model")
+		if fallbackModel, ok := service.GetFallbackModelFromContext(c); ok {
+			modelName = fallbackModel.Name
+		}
 		tokenId := c.GetInt("token_id")
 		userGroup := c.GetString("group")
 		channelId := c.GetInt("channel_id")
@@ -390,6 +416,7 @@ func processChannelError(c *gin.Context, channelError types.ChannelError, err *t
 			adminInfo["multi_key_index"] = common.GetContextKeyInt(c, constant.ContextKeyChannelMultiKeyIndex)
 		}
 		service.AppendChannelAffinityAdminInfo(c, adminInfo)
+		service.AppendFallbackModelAdminInfoFromContext(c, adminInfo)
 		other["admin_info"] = adminInfo
 		startTime := common.GetContextKeyTime(c, constant.ContextKeyRequestStartTime)
 		if startTime.IsZero() {
