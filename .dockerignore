@@ -1,5 +1,8 @@
 .github
 .git
+*.env
+.*.env
+*.swp
 *.md
 .vscode
 .gitignore
