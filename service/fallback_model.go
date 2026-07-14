@@ -238,7 +238,7 @@ func ResolveFallbackAttempt(attempt model_setting.FallbackModelAttempt, requestP
 	if !channelExposesModel(channel, attemptModel) {
 		return ResolvedFallbackAttempt{}, false
 	}
-	if !ChannelSupportsRequestPath(channel, requestPath) {
+	if !ChannelSupportsRequestPath(channel, requestPath, attemptModel) {
 		return ResolvedFallbackAttempt{}, false
 	}
 	return ResolvedFallbackAttempt{
@@ -247,7 +247,7 @@ func ResolveFallbackAttempt(attempt model_setting.FallbackModelAttempt, requestP
 	}, true
 }
 
-func ChannelSupportsRequestPath(channel *model.Channel, requestPath string) bool {
+func ChannelSupportsRequestPath(channel *model.Channel, requestPath string, requestModel string) bool {
 	if channel == nil {
 		return false
 	}
@@ -255,7 +255,7 @@ func ChannelSupportsRequestPath(channel *model.Channel, requestPath string) bool
 		return true
 	}
 	config := channel.GetOtherSettings().AdvancedCustom
-	return config != nil && config.SupportsPath(requestPath)
+	return config != nil && config.SupportsPathForModel(requestPath, requestModel)
 }
 
 func enabledChannelModelNames() (map[string]struct{}, error) {

@@ -8,6 +8,7 @@ import (
 
 	"github.com/QuantumNous/new-api/common"
 	"github.com/QuantumNous/new-api/constant"
+	"github.com/QuantumNous/new-api/dto"
 	"github.com/QuantumNous/new-api/model"
 	"github.com/QuantumNous/new-api/setting/config"
 	"github.com/QuantumNous/new-api/setting/model_setting"
@@ -203,5 +204,44 @@ func TestResolveFallbackAttemptSkipsInvalidRuntimeChannels(t *testing.T) {
 	resolved, ok = ResolveFallbackAttempt(model_setting.FallbackModelAttempt{ChannelID: 2, Model: "gpt-4.1-mini"}, "/v1/chat/completions")
 	require.True(t, ok)
 	require.Equal(t, 2, resolved.Channel.Id)
+	require.Equal(t, "gpt-4.1-mini", resolved.Model)
+}
+
+func TestResolveFallbackAttemptHonorsAdvancedCustomRouteModels(t *testing.T) {
+	db := setupFallbackModelTestDB(t)
+	channel := model.Channel{
+		Id:     3,
+		Type:   constant.ChannelTypeAdvancedCustom,
+		Key:    "sk-test",
+		Status: common.ChannelStatusEnabled,
+		Name:   "advanced-custom",
+		Models: "gpt-4o-mini,gpt-4.1-mini",
+		Group:  "default",
+	}
+	channel.SetOtherSettings(dto.ChannelOtherSettings{
+		AdvancedCustom: &dto.AdvancedCustomConfig{
+			Routes: []dto.AdvancedCustomRoute{
+				{
+					IncomingPath: "/v1/chat/completions",
+					Models:       []string{"gpt-4.1-mini"},
+				},
+			},
+		},
+	})
+	insertFallbackTestChannel(t, db, channel)
+
+	resolved, ok := ResolveFallbackAttempt(
+		model_setting.FallbackModelAttempt{ChannelID: 3, Model: "gpt-4o-mini"},
+		"/v1/chat/completions",
+	)
+	require.False(t, ok)
+	require.Nil(t, resolved.Channel)
+
+	resolved, ok = ResolveFallbackAttempt(
+		model_setting.FallbackModelAttempt{ChannelID: 3, Model: "gpt-4.1-mini"},
+		"/v1/chat/completions",
+	)
+	require.True(t, ok)
+	require.Equal(t, 3, resolved.Channel.Id)
 	require.Equal(t, "gpt-4.1-mini", resolved.Model)
 }
