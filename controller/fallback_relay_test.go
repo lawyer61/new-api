@@ -12,13 +12,14 @@ import (
 
 	"github.com/QuantumNous/new-api/common"
 	"github.com/QuantumNous/new-api/constant"
-	"github.com/QuantumNous/new-api/dto"
 	"github.com/QuantumNous/new-api/model"
 	relaycommon "github.com/QuantumNous/new-api/relay/common"
 	relayconstant "github.com/QuantumNous/new-api/relay/constant"
+	"github.com/QuantumNous/new-api/relaykit/dto"
+	"github.com/QuantumNous/new-api/relaykit/types"
 	"github.com/QuantumNous/new-api/service"
 	"github.com/QuantumNous/new-api/setting/model_setting"
-	"github.com/QuantumNous/new-api/types"
+	apptypes "github.com/QuantumNous/new-api/types"
 	"github.com/gin-gonic/gin"
 	"github.com/stretchr/testify/require"
 )
@@ -178,11 +179,11 @@ func TestRunFallbackRelaySendsRealOpenAIRequestsThroughConfiguredAttempts(t *tes
 		StartTime:       time.Now(),
 		RelayMode:       relayconstant.RelayModeChatCompletions,
 		RelayFormat:     types.RelayFormatOpenAI,
-		PriceData: types.PriceData{
+		PriceData: apptypes.PriceData{
 			ModelRatio:      1,
 			CompletionRatio: 1,
 			CacheRatio:      1,
-			GroupRatioInfo:  types.GroupRatioInfo{GroupRatio: 1},
+			GroupRatioInfo:  apptypes.GroupRatioInfo{GroupRatio: 1},
 		},
 		Request: &dto.GeneralOpenAIRequest{
 			Model: "auto",
@@ -301,11 +302,11 @@ func TestRunFallbackRelaySendsRealEmbeddingRequestsThroughConfiguredAttempts(t *
 		RelayMode:       relayconstant.RelayModeEmbeddings,
 		RelayFormat:     types.RelayFormatEmbedding,
 		RequestURLPath:  "/v1/embeddings",
-		PriceData: types.PriceData{
+		PriceData: apptypes.PriceData{
 			ModelRatio:      1,
 			CompletionRatio: 1,
 			CacheRatio:      1,
-			GroupRatioInfo:  types.GroupRatioInfo{GroupRatio: 1},
+			GroupRatioInfo:  apptypes.GroupRatioInfo{GroupRatio: 1},
 		},
 		Request: &dto.EmbeddingRequest{
 			Model: "auto-embedding",
