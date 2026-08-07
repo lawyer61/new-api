@@ -111,7 +111,6 @@ func prepareFallbackRelayAttempt(relayInfo *relaycommon.RelayInfo, publicModelNa
 	relayInfo.UseRuntimeHeadersOverride = false
 	relayInfo.ParamOverrideAudit = nil
 	relayInfo.StreamStatus = nil
-	relayInfo.UpstreamRequestBodySize = 0
 }
 
 func fallbackResponseStarted(c *gin.Context, relayInfo *relaycommon.RelayInfo) bool {
