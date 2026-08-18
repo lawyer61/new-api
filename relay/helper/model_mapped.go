@@ -4,12 +4,9 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"strings"
 
 	"github.com/QuantumNous/new-api/relay/common"
-	relayconstant "github.com/QuantumNous/new-api/relay/constant"
 	"github.com/QuantumNous/new-api/relaykit/dto"
-	"github.com/QuantumNous/new-api/setting/ratio_setting"
 	"github.com/gin-gonic/gin"
 )
 
@@ -18,14 +15,7 @@ func ModelMappedHelper(c *gin.Context, info *common.RelayInfo, request dto.Reque
 		info.ChannelMeta = &common.ChannelMeta{}
 	}
 
-	isResponsesCompact := info.RelayMode == relayconstant.RelayModeResponsesCompact
 	routeModelName := info.RouteModelName()
-	originModelName := routeModelName
-	mappingModelName := routeModelName
-	if isResponsesCompact && strings.HasSuffix(originModelName, ratio_setting.CompactModelSuffix) {
-		mappingModelName = strings.TrimSuffix(originModelName, ratio_setting.CompactModelSuffix)
-	}
-
 	// map model name
 	modelMapping := c.GetString("model_mapping")
 	if modelMapping != "" && modelMapping != "{}" {
@@ -36,7 +26,7 @@ func ModelMappedHelper(c *gin.Context, info *common.RelayInfo, request dto.Reque
 		}
 
 		// 支持链式模型重定向，最终使用链尾的模型
-		currentModel := mappingModelName
+		currentModel := routeModelName
 		visitedModels := map[string]bool{
 			currentModel: true,
 		}
@@ -45,7 +35,7 @@ func ModelMappedHelper(c *gin.Context, info *common.RelayInfo, request dto.Reque
 				// 模型重定向循环检测，避免无限循环
 				if visitedModels[mappedModel] {
 					if mappedModel == currentModel {
-						if currentModel == info.OriginModelName {
+						if currentModel == routeModelName {
 							info.IsModelMapped = false
 							return nil
 						} else {
@@ -67,18 +57,6 @@ func ModelMappedHelper(c *gin.Context, info *common.RelayInfo, request dto.Reque
 		}
 	}
 
-	if isResponsesCompact {
-		finalUpstreamModelName := mappingModelName
-		if info.IsModelMapped && info.UpstreamModelName != "" {
-			finalUpstreamModelName = info.UpstreamModelName
-		}
-		info.UpstreamModelName = finalUpstreamModelName
-		if info.FallbackAttemptModelName != "" {
-			info.FallbackAttemptModelName = ratio_setting.WithCompactModelSuffix(finalUpstreamModelName)
-		} else {
-			info.OriginModelName = ratio_setting.WithCompactModelSuffix(finalUpstreamModelName)
-		}
-	}
 	if request != nil {
 		request.SetModelName(info.UpstreamModelName)
 	}
