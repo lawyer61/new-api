@@ -57,6 +57,7 @@ bun run build
 ## Remote verification
 - Merge commit `f7f394c8833b353de83c84395baac548acfbc1a5` was pushed to `origin/main`.
 - GitHub Actions run `33851312554` (`Sync upstream and build Docker image`) completed successfully: <https://github.com/lawyer61/new-api/actions/runs/33851312554>.
+- A manual upstream-sync verification also passed: run `33855656442` completed its `Merge upstream` step successfully and correctly skipped image builds because upstream had no newer commit: <https://github.com/lawyer61/new-api/actions/runs/33855656442>.
 - `.github/workflows/ci.yml` only runs for pull requests, so the direct push did not create a separate CI run; its vet/build/test commands were run locally and passed.
 
 ## Other things that user need to note
