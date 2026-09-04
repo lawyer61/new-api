@@ -43,6 +43,21 @@ bun run build
 - Frontend production build passed.
 - Frontend i18n report shows zero missing, extra, or untranslated keys in all seven locales.
 
+## Database verification
+- Engines: SQLite `3.41.2`, MySQL `8.0.46-0ubuntu0.24.04.4`, PostgreSQL `16.15-0ubuntu0.24.04.1`.
+- Real-database migration tests passed:
+  ```bash
+  TEST_MYSQL_DSN="$MYSQL_MODEL_DSN" TEST_POSTGRES_DSN="$POSTGRES_MODEL_DSN" env -u GOROOT GOWORK=off go test -count=1 ./model
+  TEST_MYSQL_DSN="$MYSQL_CONTROLLER_DSN" TEST_POSTGRES_DSN="$POSTGRES_CONTROLLER_DSN" env -u GOROOT GOWORK=off go test -count=1 ./controller
+  ```
+- Fresh databases: the current binary completed startup, migration, `/api/status`, and graceful shutdown repeatedly on all three engines. MySQL and PostgreSQL used separate main and log databases. Their schema snapshots were unchanged on the second current-version run. SQLite needed a third run because the second run canonicalized quoting in several `CREATE TABLE` definitions; the second and third schema snapshots were identical.
+- Upgrade databases: built tag `v1.0.0-rc.31`, started it twice, inserted marker rows in `options` and `logs`, then started the merged binary twice. All three engines preserved both markers, and schema snapshots were unchanged between the two merged-version runs. MySQL/PostgreSQL separate log databases were included.
+- Fresh and upgraded databases contained 36 main tables; separately configured MySQL/PostgreSQL log databases contained one log table.
+
+## Remote verification
+- Merge commit `f7f394c8833b353de83c84395baac548acfbc1a5` was pushed to `origin/main`.
+- GitHub Actions run `33851312554` (`Sync upstream and build Docker image`) completed successfully: <https://github.com/lawyer61/new-api/actions/runs/33851312554>.
+- `.github/workflows/ci.yml` only runs for pull requests, so the direct push did not create a separate CI run; its vet/build/test commands were run locally and passed.
+
 ## Other things that user need to note
 - Local Go commands need `GOROOT` unset in this environment because the inherited value points to an older standard library.
-- Remote GitHub Actions status is recorded after the merge commit is pushed.
