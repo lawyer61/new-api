@@ -204,7 +204,7 @@ func TestRunFallbackRelaySendsRealOpenAIRequestsThroughConfiguredAttempts(t *tes
 	}
 
 	err := runFallbackRelay(ctx, info, fallbackModel, types.RelayFormatOpenAI, func(c *gin.Context, relayInfo *relaycommon.RelayInfo) *types.NewAPIError {
-		return relayByFormat(c, relayInfo, types.RelayFormatOpenAI, nil)
+		return relayFallbackAttempt(c, relayInfo, types.RelayFormatOpenAI)
 	})
 
 	require.Nil(t, err)
@@ -325,7 +325,7 @@ func TestRunFallbackRelaySendsRealEmbeddingRequestsThroughConfiguredAttempts(t *
 	}
 
 	err := runFallbackRelay(ctx, info, fallbackModel, types.RelayFormatEmbedding, func(c *gin.Context, relayInfo *relaycommon.RelayInfo) *types.NewAPIError {
-		return relayByFormat(c, relayInfo, types.RelayFormatEmbedding, nil)
+		return relayFallbackAttempt(c, relayInfo, types.RelayFormatEmbedding)
 	})
 
 	require.Nil(t, err)

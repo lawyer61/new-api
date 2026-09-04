@@ -10,6 +10,7 @@ import (
 	"github.com/QuantumNous/new-api/constant"
 	"github.com/QuantumNous/new-api/middleware"
 	"github.com/QuantumNous/new-api/model"
+	"github.com/QuantumNous/new-api/relay"
 	relaycommon "github.com/QuantumNous/new-api/relay/common"
 	"github.com/QuantumNous/new-api/relaykit/types"
 	"github.com/QuantumNous/new-api/service"
@@ -19,6 +20,17 @@ import (
 )
 
 type fallbackRelayHandler func(c *gin.Context, relayInfo *relaycommon.RelayInfo) *types.NewAPIError
+
+func relayFallbackAttempt(c *gin.Context, relayInfo *relaycommon.RelayInfo, relayFormat types.RelayFormat) *types.NewAPIError {
+	switch relayFormat {
+	case types.RelayFormatClaude:
+		return relay.ClaudeHelper(c, relayInfo)
+	case types.RelayFormatGemini:
+		return geminiRelayHandler(c, relayInfo)
+	default:
+		return relayHandler(c, relayInfo)
+	}
+}
 
 func runFallbackRelay(c *gin.Context, relayInfo *relaycommon.RelayInfo, fallbackModel model_setting.FallbackModel, relayFormat types.RelayFormat, handler fallbackRelayHandler) *types.NewAPIError {
 	if handler == nil {
@@ -64,7 +76,7 @@ func runFallbackRelay(c *gin.Context, relayInfo *relaycommon.RelayInfo, fallback
 				resolved.Channel.ChannelInfo.IsMultiKey,
 				common.GetContextKeyString(c, constant.ContextKeyChannelKey),
 				resolved.Channel.GetAutoBan(),
-			), newAPIError)
+			), newAPIError, relayInfo)
 		}
 
 		remainingAttempts := len(fallbackModel.Attempts) - attemptIndex - 1
@@ -88,6 +100,9 @@ func setupFallbackRelayAttempt(c *gin.Context, relayInfo *relaycommon.RelayInfo,
 		return newAPIError
 	}
 	addUsedChannel(c, channel.Id)
+	if newAPIError = service.PrepareTieredBillingForSelectedGroup(c, relayInfo); newAPIError != nil {
+		return newAPIError
+	}
 
 	bodyStorage, bodyErr := common.GetBodyStorage(c)
 	if bodyErr != nil {
