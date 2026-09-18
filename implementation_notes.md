@@ -30,7 +30,8 @@
 - Upgrade verification used release tag `v1.0.0-rc.37` (`385d2dfd10d821b25c8a6766bd16eea248cb1652`). The release binary was started twice, marker rows were inserted into `options` and the separate `logs` database, then the merged binary was started twice. All markers, indexes, constraints, and schema snapshots were preserved and stable on SQLite, MySQL, and PostgreSQL.
 
 ### Remote status
-- Push and image-build workflow results are recorded after the merge commit is published.
+- Merge commit `e4591ecaaeab7317d991cf2520659e58cf976bad` was pushed to `origin/main`.
+- GitHub Actions run `35343155980` completed successfully. Its `Build Docker image` job built and pushed the `main`, commit-SHA, and `latest` GHCR tags: <https://github.com/lawyer61/new-api/actions/runs/35343155980>.
 
 ## Design decisions
 - Merge `upstream/main` instead of rewriting fork history.
