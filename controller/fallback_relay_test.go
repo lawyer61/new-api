@@ -12,6 +12,7 @@ import (
 
 	"github.com/QuantumNous/new-api/common"
 	"github.com/QuantumNous/new-api/constant"
+	"github.com/QuantumNous/new-api/middleware"
 	"github.com/QuantumNous/new-api/model"
 	relaycommon "github.com/QuantumNous/new-api/relay/common"
 	relayconstant "github.com/QuantumNous/new-api/relay/constant"
@@ -19,6 +20,7 @@ import (
 	"github.com/QuantumNous/new-api/relaykit/types"
 	"github.com/QuantumNous/new-api/service"
 	"github.com/QuantumNous/new-api/setting/model_setting"
+	"github.com/QuantumNous/new-api/setting/ratio_setting"
 	apptypes "github.com/QuantumNous/new-api/types"
 	"github.com/gin-gonic/gin"
 	"github.com/stretchr/testify/require"
@@ -214,6 +216,102 @@ func TestRunFallbackRelaySendsRealOpenAIRequestsThroughConfiguredAttempts(t *tes
 	require.Contains(t, requestsByChannel[1][0], `"model":"mapped-a"`)
 	require.Contains(t, requestsByChannel[2][0], `"model":"mapped-b"`)
 	require.Equal(t, []string{"1", "2"}, ctx.GetStringSlice("use_channel"))
+}
+
+func TestRelayUsesFallbackModelSelectedByDistributor(t *testing.T) {
+	db := setupModelListControllerTestDB(t)
+	require.NoError(t, db.AutoMigrate(&model.Log{}, &model.Token{}))
+	require.NoError(t, db.Create(&model.User{
+		Id:       1001,
+		Username: "fallback-entry-user",
+		Status:   common.UserStatusEnabled,
+		Group:    "default",
+		Quota:    1000,
+	}).Error)
+	storedQuota, err := model.GetUserQuota(1001, true)
+	require.NoError(t, err)
+	require.Equal(t, 1000, storedQuota)
+	service.InitHttpClient()
+
+	originalMemoryCacheEnabled := common.MemoryCacheEnabled
+	originalRetryTimes := common.RetryTimes
+	common.MemoryCacheEnabled = false
+	common.RetryTimes = 1
+	t.Cleanup(func() {
+		common.MemoryCacheEnabled = originalMemoryCacheEnabled
+		common.RetryTimes = originalRetryTimes
+	})
+
+	originalModelRatios := ratio_setting.ModelRatio2JSONString()
+	require.NoError(t, ratio_setting.UpdateModelRatioByJSONString(`{"auto":0}`))
+	t.Cleanup(func() {
+		require.NoError(t, ratio_setting.UpdateModelRatioByJSONString(originalModelRatios))
+	})
+
+	var upstreamBodies []string
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		body, err := io.ReadAll(r.Body)
+		require.NoError(t, err)
+		upstreamBodies = append(upstreamBodies, string(body))
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{
+			"id": "chatcmpl-fallback-entry-test",
+			"object": "chat.completion",
+			"created": 1710000000,
+			"model": "mapped-fallback",
+			"choices": [{
+				"index": 0,
+				"message": {"role": "assistant", "content": "pong"},
+				"finish_reason": "stop"
+			}],
+			"usage": {"prompt_tokens": 1, "completion_tokens": 1, "total_tokens": 2}
+		}`))
+	}))
+	defer upstream.Close()
+
+	mapping := `{"channel-model":"mapped-fallback"}`
+	insertFallbackRelayTestChannel(t, model.Channel{
+		Id:           1,
+		Type:         constant.ChannelTypeOpenAI,
+		Key:          "sk-fallback",
+		Status:       common.ChannelStatusEnabled,
+		Name:         "fallback",
+		Models:       "channel-model",
+		Group:        "default",
+		BaseURL:      &upstream.URL,
+		ModelMapping: &mapping,
+	})
+	withFallbackModelSettingsForController(t, model_setting.FallbackModelSettings{
+		Models: []model_setting.FallbackModel{{
+			Name:     "auto",
+			Enabled:  true,
+			Groups:   []string{"default"},
+			Attempts: []model_setting.FallbackModelAttempt{{ChannelID: 1, Model: "channel-model"}},
+		}},
+	})
+
+	router := gin.New()
+	router.POST("/v1/chat/completions", func(c *gin.Context) {
+		common.SetContextKey(c, constant.ContextKeyUserId, 1001)
+		common.SetContextKey(c, constant.ContextKeyTokenId, 2001)
+		common.SetContextKey(c, constant.ContextKeyTokenUnlimited, true)
+		common.SetContextKey(c, constant.ContextKeyTokenGroup, "default")
+		common.SetContextKey(c, constant.ContextKeyUserGroup, "default")
+		common.SetContextKey(c, constant.ContextKeyUsingGroup, "default")
+		common.SetContextKey(c, constant.ContextKeyUserSetting, dto.UserSetting{BillingPreference: "wallet_only"})
+		c.Set("token_name", "fallback-entry-test")
+	}, middleware.Distribute(), func(c *gin.Context) {
+		Relay(c, types.RelayFormatOpenAI)
+	})
+
+	recorder := httptest.NewRecorder()
+	request := httptest.NewRequest(http.MethodPost, "/v1/chat/completions", strings.NewReader(`{"model":"auto","messages":[{"role":"user","content":"ping"}]}`))
+	request.Header.Set("Content-Type", "application/json")
+	router.ServeHTTP(recorder, request)
+
+	require.Equal(t, http.StatusOK, recorder.Code, recorder.Body.String())
+	require.Len(t, upstreamBodies, 1)
+	require.Contains(t, upstreamBodies[0], `"model":"mapped-fallback"`)
 }
 
 func TestRunFallbackRelaySendsRealEmbeddingRequestsThroughConfiguredAttempts(t *testing.T) {

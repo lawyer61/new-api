@@ -1,5 +1,39 @@
 # Implementation Notes
 
+## 2026-09-18 fallback relay regression fix
+
+### Design decisions
+- Restored the fallback handoff only in `controller.Relay`, immediately after shared request billing and before the ordinary random-channel retry loop.
+- Reused the existing `runFallbackRelay` path instead of duplicating channel selection or changing upstream's shared retry selector. This keeps the fork-specific seam small for future upstream merges.
+- Kept upstream's centralized billing refund and performance-result defers; the obsolete pre-merge fallback metrics special case was not restored.
+
+### Modules
+- `controller/relay.go`: consumes the fallback model selected by `middleware.Distribute` and runs its configured attempts.
+- `controller/fallback_relay_test.go`: covers the external chat-completions path from distributor selection through a real fallback upstream request.
+
+### How to run
+```bash
+env -u GOROOT GOWORK=off go test ./controller -run '^TestRelayUsesFallbackModelSelectedByDistributor$' -count=2
+env -u GOROOT GOWORK=off go vet ./...
+env -u GOROOT GOWORK=off go build ./...
+env -u GOROOT GOWORK=off make test
+```
+
+### Implemented
+- Fixed the post-merge regression where the distributor recognized a fallback model, but `controller.Relay` ignored that context and entered ordinary channel selection for the public fallback name.
+- Added a regression test that previously reproduced `分组 default 下模型 auto 的可用渠道不存在（retry）` and now verifies the configured fallback channel receives the mapped upstream model.
+
+### Not implemented / known limitations
+- No database, frontend, fallback configuration format, or provider-specific behavior changed.
+
+### Observed results
+- The regression test failed deterministically twice before the fix with the reported no-channel retry error, then passed twice after the fix.
+- Controller and middleware package tests passed.
+- Root `go vet`, `go build ./...`, and `make test` passed; `make test` also passed the independent `relaykit` test suite.
+
+### Other things that user need to note
+- `.github.env` remains untracked and is not ignored.
+
 ## 2026-09-18 upstream sync
 
 ### Integration decisions

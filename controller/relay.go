@@ -145,6 +145,20 @@ func Relay(c *gin.Context, relayFormat types.RelayFormat) {
 		newAPIError = relay.RefundFailedRequestBilling(c, relayInfo, newAPIError)
 	}()
 
+	if fallbackModel, ok := service.GetFallbackModelFromContext(c); ok {
+		relayInfo.RetryIndex = 0
+		relayInfo.LastError = nil
+		newAPIError = runFallbackRelay(c, relayInfo, fallbackModel, relayFormat, func(c *gin.Context, relayInfo *relaycommon.RelayInfo) *types.NewAPIError {
+			return relayFallbackAttempt(c, relayInfo, relayFormat)
+		})
+		useChannel := c.GetStringSlice("use_channel")
+		if len(useChannel) > 1 {
+			retryLogStr := fmt.Sprintf("重试：%s", strings.Trim(strings.Join(strings.Fields(fmt.Sprint(useChannel)), "->"), "[]"))
+			logger.LogInfo(c, retryLogStr)
+		}
+		return
+	}
+
 	retryParam := &service.RetryParam{
 		Ctx:         c,
 		TokenGroup:  relayInfo.TokenGroup,
