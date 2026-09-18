@@ -67,8 +67,14 @@ func runFallbackRelay(c *gin.Context, relayInfo *relaycommon.RelayInfo, fallback
 		newAPIError = service.NormalizeViolationFeeError(newAPIError)
 		relayInfo.LastError = newAPIError
 		lastError = newAPIError
+		remainingAttempts := len(fallbackModel.Attempts) - attemptIndex - 1
+		decision := service.DecideRelayRetry(c, newAPIError, remainingAttempts)
+		if fallbackResponseStarted(c, relayInfo) {
+			decision = service.PolicyDecision{Action: "stop", Reason: "response_started", Source: "system"}
+		}
 
 		if resolved.Channel != nil {
+			service.RecordPolicyFailure(c, resolved.Channel.Id, newAPIError, decision)
 			processChannelError(c, *types.NewChannelError(
 				resolved.Channel.Id,
 				resolved.Channel.Type,
@@ -79,8 +85,7 @@ func runFallbackRelay(c *gin.Context, relayInfo *relaycommon.RelayInfo, fallback
 			), newAPIError, relayInfo)
 		}
 
-		remainingAttempts := len(fallbackModel.Attempts) - attemptIndex - 1
-		if fallbackResponseStarted(c, relayInfo) || !shouldRetry(c, newAPIError, remainingAttempts) {
+		if decision.Action != "retry" {
 			break
 		}
 	}
@@ -95,11 +100,12 @@ func runFallbackRelay(c *gin.Context, relayInfo *relaycommon.RelayInfo, fallback
 }
 
 func setupFallbackRelayAttempt(c *gin.Context, relayInfo *relaycommon.RelayInfo, channel *model.Channel, attemptModel string) *types.NewAPIError {
+	service.RequestPolicy(c).BeginAttempt(channel, relayInfo.UsingGroup)
 	newAPIError := middleware.SetupContextForSelectedChannel(c, channel, attemptModel)
 	if newAPIError != nil {
 		return newAPIError
 	}
-	addUsedChannel(c, channel.Id)
+	service.AppendUsedChannel(c, channel.Id)
 	if newAPIError = service.PrepareTieredBillingForSelectedGroup(c, relayInfo); newAPIError != nil {
 		return newAPIError
 	}

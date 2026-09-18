@@ -249,7 +249,7 @@ func testFallbackModelChain(ctx context.Context, fallbackModel model_setting.Fal
 		if newAPIError == nil && testResult.localErr != nil {
 			newAPIError = types.NewOpenAIError(testResult.localErr, types.ErrorCodeBadResponse, http.StatusInternalServerError)
 		}
-		if !shouldRetry(testResult.context, newAPIError, len(fallbackModel.Attempts)-attemptIndex-1) {
+		if !service.ShouldRetryRelayError(testResult.context, newAPIError, len(fallbackModel.Attempts)-attemptIndex-1) {
 			break
 		}
 	}

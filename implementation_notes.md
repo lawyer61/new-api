@@ -1,5 +1,37 @@
 # Implementation Notes
 
+## 2026-09-18 upstream sync
+
+### Integration decisions
+- Fast-forwarded local `main` to the newer `origin/main`, then merged `upstream/main` at `3524fe0b15794d8d19378827d36a7edc0b0e91ea`.
+- Resolved conflicts by taking the upstream routing, audit, relay-error, and locale structures, then restoring fallback-model behavior only at narrow seams.
+- Kept fallback selection as a small pre-selection branch in `middleware/distributor.go`; normal and pinned requests continue through upstream's shared `SelectChannelForRequest` path.
+- Switched fallback attempts to upstream's shared `AppendUsedChannel`, retry-policy, failure-audit, and channel-error helpers instead of retaining copied controller logic.
+- Preserved exactly the 22 fallback-model UI translation keys. Two stale, unused fork-only locale keys remain dropped.
+
+### Verification
+- Backend CI-equivalent checks passed:
+  ```bash
+  env -u GOROOT GOWORK=off go vet ./...
+  (cd relaykit && env -u GOROOT GOWORK=off go vet ./...)
+  env -u GOROOT GOWORK=off go build ./...
+  (cd relaykit && env -u GOROOT GOWORK=off go build ./...)
+  env -u GOROOT GOWORK=off make test
+  ```
+- Frontend dependency install, typecheck, production build, and lint/format checks for the four fork-owned TypeScript files passed.
+- Full frontend test result: 149 files and 1,907 tests passed; one upstream test failed: `src/features/usage-logs/components/__tests__/group-filter.test.tsx` expects a sensitive dropdown to remain inside its masked field, while upstream commit `0cde9d94f6` now portals that dropdown to `document.body`. The production and test files match `upstream/main`; no unrelated fork patch was added.
+- Repository-wide frontend lint and format checks still fail on upstream files. The failures are outside the fallback-model integration, so they were not mass-fixed.
+- `bun run i18n:sync` reported zero missing and extra keys. Its remaining untranslated entries are upstream product names/terms (`SGLang`, `Zhipu GLM`, and `Responses WebSocket`).
+
+### Database verification
+- Engines: SQLite `3.41.2`, MySQL `8.0.46-0ubuntu0.24.04.4`, PostgreSQL `16.15-0ubuntu0.24.04.1`.
+- Real-database model and controller matrix tests passed with `TEST_MYSQL_DSN` and `TEST_POSTGRES_DSN`, including the controller's isolated-database matrix.
+- Fresh startup/migration was repeated until schema snapshots were stable on all three engines. Results: SQLite 37 combined tables; MySQL and PostgreSQL 36 main tables plus 2 tables in their separately configured log databases.
+- Upgrade verification used release tag `v1.0.0-rc.37` (`385d2dfd10d821b25c8a6766bd16eea248cb1652`). The release binary was started twice, marker rows were inserted into `options` and the separate `logs` database, then the merged binary was started twice. All markers, indexes, constraints, and schema snapshots were preserved and stable on SQLite, MySQL, and PostgreSQL.
+
+### Remote status
+- Push and image-build workflow results are recorded after the merge commit is published.
+
 ## Design decisions
 - Merge `upstream/main` instead of rewriting fork history.
 - Prefer upstream implementations in conflicts, then reattach fallback-model behavior at narrow extension points.
