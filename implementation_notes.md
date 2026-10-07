@@ -1,5 +1,51 @@
 # Implementation Notes
 
+## 2026-10-07 upstream sync
+
+### Design decisions
+- Fast-forwarded to the existing fork `origin/main` at `c64642f10`, then merged canonical upstream `78bd5b1cbf7bffc462a515a6c6e27567ace7a4d8` without rewriting history.
+- Kept upstream's permission-route registration and reattached the fallback route with one registration call. Preserved the distributor-to-relay fallback handoff, public/attempt model separation, model mapping, retries, and audit metadata.
+- Used upstream locale files as the base, restored exactly the 22 existing fallback keys through the project translation script, and ran i18n sync. No upstream translation value was overridden.
+- Reused the existing system-settings token scopes for fallback administration: `option:read` for GET, `option:write` for PUT and POST test. The existing RootAuth requirement remains unchanged; no new scope, authentication mechanism, or generic extension framework was introduced.
+
+### Modules
+- `router/api-router.go`: retains the fork route alongside upstream's scoped permission registration.
+- `middleware/access_token_routes.go`: declares the three fallback administration routes in upstream's new access-token rule table.
+- `middleware/auth_test.go`: verifies successful scoped Root requests and denial for read-only writes, unrelated scopes, non-Root roles, expired tokens, and revoked tokens.
+- `web/src/i18n/locales/*.json`: preserves all seven languages and their existing fallback translations.
+
+### How to run
+```bash
+env -u GOROOT GOWORK=off go vet ./...
+env -u GOROOT GOWORK=off go build ./...
+(cd relaykit && env -u GOROOT GOWORK=off go vet ./... && env -u GOROOT GOWORK=off go build ./...)
+env -u GOROOT GOWORK=off make test
+TEST_MYSQL_DSN="$MYSQL_MODEL_DSN" TEST_POSTGRES_DSN="$POSTGRES_MODEL_DSN" env -u GOROOT GOWORK=off go test -count=1 ./model
+TEST_MYSQL_DSN="$MYSQL_CONTROLLER_DSN" TEST_POSTGRES_DSN="$POSTGRES_CONTROLLER_DSN" AUDIT_MYSQL_DSN="$MYSQL_CONTROLLER_DSN" AUDIT_POSTGRES_DSN="$POSTGRES_CONTROLLER_DSN" env -u GOROOT GOWORK=off go test -count=1 ./controller -run '(DatabaseMatrix|Migration)'
+(cd web && bun install --frozen-lockfile && bun run i18n:sync && bun run typecheck && bun run test && bun run build)
+```
+
+### Implemented
+- Resolved the router and seven locale conflicts while preserving fork functionality at narrow seams.
+- Fixed the semantic integration gap detected by upstream's route-coverage test: fallback routes otherwise had no access-token declaration and would reject valid scoped requests.
+- Kept the existing GitHub upstream-sync/GHCR workflow and its push-triggered image build.
+
+### Not implemented / known limitations
+- Repository-wide frontend lint and format checks still report upstream-only files; all reported paths were compared with `upstream/main` and none contain fork differences. No unrelated mass cleanup was added. The four fork-owned settings TypeScript files pass their targeted checks.
+- Local ctx history search is unavailable because no verified index/importable source is configured; integration used the supplied conversation context, Git history, and existing implementation notes.
+
+### Observed results
+- The external fallback relay/model-mapping regressions passed, as did complete middleware/router tests and the new scope/role/expiry/revocation test.
+- Root and independent relaykit vet/build checks and the final `env -u GOROOT GOWORK=off make test` passed. A first controller suite exceeded its default ten-minute timeout during local SQLite filesystem sync under concurrent load; the active test passed alone in 1.902s, and the complete controller suite passed on rerun in 37.150s. No permanent timeout or production behavior workaround was added.
+- Frontend typecheck/build passed; all 173 test files and 2,161 tests passed. i18n has zero missing/extra keys; remaining untranslated entries are upstream provider/product names and `Responses WebSocket`.
+- Real database versions: SQLite 3.41.2, MySQL 8.0.46-0ubuntu0.24.04.4, PostgreSQL 16.15-0ubuntu0.24.04.1. Model and controller three-database matrices passed; task-plugin/settlement paths also passed with `TEST_TASK_DB_DIALECT=mysql` and `postgres`.
+- All six fresh/latest-release (`v1.0.0-rc.41`) upgrade startup scenarios passed. Each version started at least twice; main/log markers, indexes/constraints and a 70,004-byte plugin source survived. Separate MySQL/PostgreSQL log databases were included. Schema snapshots were stable; MySQL's mutable next-ID counters were excluded after confirming that only conflict-safe role seeding changed them. Fresh MySQL/PostgreSQL had 37 main tables and 2 log tables; SQLite had 38 combined tables.
+- Startup matrix command: `source /tmp/new-api-sync-20261007/env.sh && SYNC_DB_PREFIX="${SYNC_DB_USER}_v2" python3 /tmp/new-api-sync-20261007/verify_startup.py`; result log: `/tmp/new-api-sync-20261007/startup-matrix-final.log`. All validation scripts and credentials stay outside the repository.
+
+### Other things that user need to note
+- Security references: [OWASP ASVS 5.0.0](https://owasp.org/www-project-application-security-verification-standard/), [Authentication Cheat Sheet](https://cheatsheetseries.owasp.org/cheatsheets/Authentication_Cheat_Sheet.html), and [Session Management Cheat Sheet](https://cheatsheetseries.owasp.org/cheatsheets/Session_Management_Cheat_Sheet.html). This scoped integration preserves server-side role/scope enforcement, fail-closed rules, upstream credential hashing/audit behavior, and existing session handling; it is not a claim of a full-project ASVS audit.
+- `.github.env` remains untracked, absent from `.gitignore`, and excluded from the Docker build context by existing env-file patterns.
+
 ## 2026-09-18 fallback relay regression fix
 
 ### Design decisions
