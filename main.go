@@ -62,6 +62,10 @@ func main() {
 		common.FatalLog("failed to initialize resources: " + err.Error())
 		return
 	}
+	idleDBMode := common.GetEnvOrDefaultBool("IDLE_DB_MODE", false)
+	if idleDBMode {
+		common.SysLog("IDLE_DB_MODE enabled (single-instance only): routine DB polling, credential refresh, subscription maintenance and system tasks paused; auth cleanup and pending-data flushes remain enabled")
+	}
 
 	common.SysLog("New API " + common.Version + " started")
 	if os.Getenv("GIN_MODE") != "debug" {
@@ -103,7 +107,9 @@ func main() {
 			model.InitChannelCache()
 		}()
 
-		go model.SyncChannelCache(common.SyncFrequency)
+		if !idleDBMode {
+			go model.SyncChannelCache(common.SyncFrequency)
+		}
 	}
 	wsmanager.StartSubscriber(context.Background())
 
@@ -112,11 +118,18 @@ func main() {
 	model.GetPricing()
 
 	// 热更新配置
-	go model.SyncOptions(common.SyncFrequency)
-	go controller.SyncTaskPlugins()
+	if idleDBMode {
+		// Keep database-backed plugins available without periodic reloads.
+		controller.SyncTaskPluginsOnce()
+	} else {
+		go model.SyncOptions(common.SyncFrequency)
+		go controller.SyncTaskPlugins()
+	}
 
 	// 周期性重载授权策略，保证多节点/多 master 部署下权限变更能传播到每个实例
-	go authz.StartPolicySync(common.SyncFrequency)
+	if !idleDBMode {
+		go authz.StartPolicySync(common.SyncFrequency)
+	}
 
 	// 数据看板
 	go model.UpdateQuotaData()
@@ -126,18 +139,22 @@ func main() {
 		if err != nil {
 			common.FatalLog("failed to parse CHANNEL_UPDATE_FREQUENCY: " + err.Error())
 		}
-		go controller.AutomaticallyUpdateChannels(frequency)
+		if !idleDBMode {
+			go controller.AutomaticallyUpdateChannels(frequency)
+		}
 	}
 
-	// Codex credential auto-refresh check every 10 minutes, refresh when expires within 1 day
-	service.StartCodexCredentialAutoRefreshTask()
+	if !idleDBMode {
+		// Codex credential auto-refresh check every 10 minutes, refresh when expires within 1 day
+		service.StartCodexCredentialAutoRefreshTask()
 
-	// Subscription quota reset task (daily/weekly/monthly/custom)
-	service.StartSubscriptionQuotaResetTask()
+		// Subscription quota reset task (daily/weekly/monthly/custom)
+		service.StartSubscriptionQuotaResetTask()
 
-	// Report this process as a system instance so the System Info page can show
-	// all currently alive nodes in multi-instance deployments.
-	service.StartSystemInstanceReporter()
+		// Report this process as a system instance so the System Info page can show
+		// all currently alive nodes in multi-instance deployments.
+		service.StartSystemInstanceReporter()
+	}
 
 	// Wire task polling adaptor factory (breaks service -> relay import cycle).
 	// Must run before the system task runner starts: the async_task_poll handler
@@ -155,8 +172,10 @@ func main() {
 	// (DB-lease dedup across masters + run history), then start the runner that
 	// schedules and executes them. Master-only execution and the UpdateTask
 	// switch are enforced inside the runner and each handler's Enabled().
-	controller.RegisterScheduledSystemTasks()
-	service.StartSystemTaskRunner()
+	if !idleDBMode {
+		controller.RegisterScheduledSystemTasks()
+		service.StartSystemTaskRunner()
+	}
 
 	if os.Getenv("BATCH_UPDATE_ENABLED") == "true" {
 		common.BatchUpdateEnabled = true

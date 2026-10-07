@@ -1,5 +1,64 @@
 # Implementation Notes
 
+## 2026-10-07 idle database mode
+
+### Design decisions
+- Added the opt-in startup environment switch `IDLE_DB_MODE`, default `false`. Read it after `InitResources()` so `.env` loading still works. Changing it requires a process restart; this is not a dashboard option.
+- Kept the change in existing startup call sites instead of adding a scheduler abstraction or changing individual services. Unset/false retains the upstream startup behavior.
+- Intended deployment: one master instance serving ordinary API relay, with management changes made through that instance. Do not use when subscription maintenance, Codex OAuth renewal, background system tasks, asynchronous task polling, or cross-node configuration/authorization propagation is required.
+- Retained initial DB/migration, option, authorization, channel-cache and OAuth loading. In idle mode, load persisted task plugins once synchronously before serving requests, without their 30-second reload loop.
+- Retained security cleanup and request-driven persistence. Batch billing and quota-dashboard flush loops return without SQL when their queues are empty; disabling those loops could discard pending accounting data. Performance-metric flushes also remain enabled.
+
+### Modules
+- `main.go`: guards channel/config/plugin/policy polling, automatic channel-balance updates, Codex refresh, subscription maintenance, instance reporting, scheduled-task registration and the system-task runner.
+- `.env.example`: documents the switch, restart requirement, supported deployment and background features it pauses.
+- No frontend, database schema/driver, billing calculation, plugin metadata or workflow changes.
+
+### How to run
+```bash
+env -u GOROOT GOWORK=off go build -o /tmp/new-api-idle-20261007/new-api .
+# Native deployment; for Docker/Compose add the same variables to the service environment.
+IDLE_DB_MODE=true MEMORY_CACHE_ENABLED=true /tmp/new-api-idle-20261007/new-api
+# Remove IDLE_DB_MODE or set it to false and restart to restore ordinary background work.
+
+env -u GOROOT GOWORK=off go vet ./...
+env -u GOROOT GOWORK=off make test
+source /tmp/new-api-sync-20261007/env.sh
+TEST_MYSQL_DSN="$MYSQL_MODEL_DSN" TEST_POSTGRES_DSN="$POSTGRES_MODEL_DSN" env -u GOROOT GOWORK=off go test -count=1 ./model
+TEST_MYSQL_DSN="$MYSQL_CONTROLLER_DSN" TEST_POSTGRES_DSN="$POSTGRES_CONTROLLER_DSN" AUDIT_MYSQL_DSN="$MYSQL_CONTROLLER_DSN" AUDIT_POSTGRES_DSN="$POSTGRES_CONTROLLER_DSN" env -u GOROOT GOWORK=off go test -count=1 ./controller -run '(DatabaseMatrix|Migration)'
+python3 /tmp/new-api-idle-20261007/verify_idle.py
+```
+
+### Implemented
+- One reversible switch pauses the analyzed routine DB pollers while preserving startup state and the existing local management refresh paths.
+- Kept task adaptor wiring, Redis subscriber, monitoring, authentication checks, audit/persistence, batch billing and quota-dashboard persistence unchanged.
+
+### Not implemented / known limitations
+- Not a zero-SQL or automatic sleep/wake mode. The current fork's master-only authentication cleanup performs SQL at startup and hourly. Requests, management/monitoring clients, queued data flushes, and performance-metric retention cleanup (`retention_days > 0`) can still access DB.
+- External DB writes and changes from other nodes are not periodically propagated while idle mode is enabled; restart or use the existing explicit local reload path. Direct database edits are not the supported management path for this mode.
+- System tasks remain durable but do not execute until ordinary mode is restored. This includes manual log cleanup jobs and asynchronous task completion/refund polling. No on-demand scheduler or alternate settlement path was added.
+- No schema changes, so a new fresh/latest-release migration matrix is not required for this switch; real SQLite/MySQL/PostgreSQL runtime and existing database matrices are required and recorded below.
+
+### Observed results
+- Root vet/build, independent relaykit vet/build and `make test` passed. `make test` excludes the embedded-web main package; the real-binary runtime probe below covers the changed startup behavior instead of adding a layout/assertion-only test.
+- Fresh, non-cached auth-policy, expired/revoked credential, auth-cleanup, local plugin refresh and external fallback regression tests passed: `env -u GOROOT GOWORK=off go test -count=1 ./service/authz ./service ./middleware ./controller -run 'Test(SetUserPermissions|.*Expired.*|.*Revok.*|.*AuthArtifacts.*|UploadTaskPluginRefreshesRuntimeSyncState|ActivateTaskPluginRefreshesRuntimeSyncState|SyncTaskPluginsPublishesOneGenerationForWholeBatch|RelayUsesFallbackModelSelectedByDistributor)'`.
+- Real database versions: SQLite 3.41.2, MySQL 8.0.46-0ubuntu0.24.04.4, PostgreSQL 16.15-0ubuntu0.24.04.1. Complete model matrix passed (11.465s); controller database/migration matrix passed (6.387s), using the commands above.
+- All nine real-process scenarios passed: each engine with true, false and unset. Every scenario loads a stored SystemName, a channel and a stored native task plugin; the plugin query returns persisted data, a chat request reaches a local HTTP upstream, and pending batch billing is flushed to the user row. Separate MySQL/PostgreSQL log databases are configured.
+- The probe uses `MEMORY_CACHE_ENABLED=true`, `SYNC_FREQUENCY=1`, `BATCH_UPDATE_ENABLED=true`, empty queues after the request flush, and no HTTP requests during each 65-second observation. Counts are executed ORM SQL statements from DEBUG traces, not a claim about all deployments or indefinite idle operation:
+
+  | Engine | `true` | `false` | Unset |
+  | --- | ---: | ---: | ---: |
+  | SQLite | 0 | 340 | 341 |
+  | MySQL | 0 | 342 | 342 |
+  | PostgreSQL | 0 | 340 | 342 |
+
+- Ordinary modes show option/channel/policy/plugin/instance/system-task SQL; idle mode shows none in those windows. The hourly security cleanup and non-default performance retention remain documented exceptions. Results: `/tmp/new-api-idle-20261007/idle-results.json`; full private traces are in the same off-repo directory.
+
+### Other things that user need to note
+- Security references: [OWASP ASVS 5.0.0](https://owasp.org/www-project-application-security-verification-standard/), [Authentication Cheat Sheet](https://cheatsheetseries.owasp.org/cheatsheets/Authentication_Cheat_Sheet.html), [Session Management Cheat Sheet](https://cheatsheetseries.owasp.org/cheatsheets/Session_Management_Cheat_Sheet.html). The change retains server-side initialization, authorization, expiry/revocation checks and credential/session cleanup. Local permission management commits then reloads policy; multi-node/out-of-band revocation is explicitly outside this mode. This is not a full-project ASVS audit.
+- The idle-runtime probe and its temporary databases/logs are outside the repository. Local ctx search remains unavailable; current code and existing records were used instead.
+- `.github.env` and the user-provided `task_mitigate_db_access.md` must remain untracked and absent from `.gitignore`; neither is part of this commit or the remote Docker context.
+
 ## 2026-10-07 upstream sync
 
 ### Design decisions
