@@ -1,5 +1,61 @@
 # Implementation Notes
 
+## 2026-10-18 upstream sync and automation repair
+
+### Design decisions
+- Merged canonical `upstream/main` at `058c8231b68c51ee02abee15befcd720fee9f4a2` into fork `main` without rewriting history. Git merged all source files cleanly; the existing fallback-routing seams and `IDLE_DB_MODE` startup guards remain intact.
+- The latest failed scheduled run, [39109958950](https://github.com/lawyer61/new-api/actions/runs/39109958950), completed its merge but GitHub rejected the push because `GITHUB_TOKEN` cannot update `.github/workflows/ci.yml`. This was a credential-permission failure, not a textual merge conflict.
+- With explicit user approval, stored the supplied workflow-capable token as repository Actions Secret `UPSTREAM_SYNC_TOKEN`, encrypted with GitHub's public key using the installed libsodium. Only the sync checkout uses that secret; GHCR publishing still uses the job's `GITHUB_TOKEN`.
+- A PAT push triggers the existing push image job. Removed the duplicate after-sync image job and its unused output rather than adding another trigger or build abstraction.
+- Kept upstream production code unchanged. The only integration test correction reads PostgreSQL's physical index columns in order: the pinned GORM PostgreSQL driver's `GetIndexes()` query has no ordering guarantee. Do not reorder the correctly migrated production index to satisfy unordered metadata.
+
+### Modules
+- `.github/workflows/upstream-sync-and-ghcr.yml`: workflow-capable sync credentials and one push-triggered image build path.
+- `model/audit_log_test.go`: checks actual PostgreSQL index order while retaining the existing SQLite/MySQL assertions and uniqueness/data-preservation checks.
+- Upstream updates include the independent `tokenkit/` module, the root/tokenkit Go 1.26 baseline, a token quota-query flag and the audit ordering index. No fork-only dependency, schema, UI or authentication-flow redesign was added.
+
+### How to run
+```bash
+env -u GOROOT GOWORK=off go vet ./...
+env -u GOROOT GOWORK=off go build ./...
+env -u GOROOT GOWORK=off make test
+(cd relaykit && env -u GOROOT GOWORK=off GOTOOLCHAIN=go1.26.0 go vet ./... && env -u GOROOT GOWORK=off GOTOOLCHAIN=go1.26.0 go build ./...)
+(cd tokenkit && env -u GOROOT GOWORK=off go vet ./... && env -u GOROOT GOWORK=off go build ./...)
+(cd web && bun install --frozen-lockfile && bun run typecheck && bun run test && bun run build && bun run i18n:sync)
+/root/.local/bin/actionlint .github/workflows/upstream-sync-and-ghcr.yml
+# Private local test DSNs; all databases are isolated, not deployment data.
+source /tmp/new-api-sync-20261018/env.sh
+TEST_MYSQL_DSN="$MYSQL_MODEL_DSN" TEST_POSTGRES_DSN="$POSTGRES_MODEL_DSN" env -u GOROOT GOWORK=off go test -count=1 ./model
+TEST_MYSQL_DSN="$MYSQL_CONTROLLER_DSN" TEST_POSTGRES_DSN="$POSTGRES_CONTROLLER_DSN" AUDIT_MYSQL_DSN="$MYSQL_CONTROLLER_DSN" AUDIT_POSTGRES_DSN="$POSTGRES_CONTROLLER_DSN" env -u GOROOT GOWORK=off go test -count=1 ./controller -run '(DatabaseMatrix|Migration|TokenAllowUserQuotaQuery)'
+python3 /tmp/new-api-sync-20261018/verify_startup.py
+python3 /tmp/new-api-sync-20261018/verify_idle.py
+```
+
+### Implemented
+- Incorporated 101 upstream commits while retaining the existing fork extension points and all 22 fallback locale keys in each of seven languages, without overriding upstream translations.
+- Repaired automatic sync's workflow-write permission boundary and removed duplicate image publication.
+
+### Not implemented / known limitations
+- Actual future source conflicts still stop automatic sync for review; no blanket `ours`/`theirs` resolver or generated-file merge override was added.
+- The sync secret must remain valid with repository/workflow write access. No credential file is committed or added to `.gitignore`.
+- i18n has zero missing/extra keys. The unchanged upstream report still flags 4 Japanese, 5 Russian and 3 simplified-Chinese entries as untranslated; no unrelated translation rewrites were added.
+- A seam check also identified an existing fork limitation in AdvancedCustom per-model passthrough matching of fallback targets. It is present before this sync and has no triggering change in this upstream update; no unrelated production patch was included.
+
+### Observed results
+- Root vet/build and `make test` passed, including independent relaykit/tokenkit tests; independent module vet/build passed. Frontend dependency installation, typecheck and targeted lint of the four fork-owned settings files passed.
+- `actionlint` v1.7.7, YAML parsing and shell syntax validation passed for the fork workflow.
+- Actual runtime database versions: SQLite 3.50.4, MySQL 8.0.46-0ubuntu0.24.04.4 and PostgreSQL 16.15-0ubuntu0.24.04.1. The complete model matrix and controller database/migration matrices passed; task settlement and >64 KiB plugin persistence passed on MySQL/PostgreSQL. The audit migration regression failed with unordered GORM metadata before the correction and passed on all three engines afterward; model vet passed again.
+- All nine real-process fresh/latest-release (`v1.0.0-rc.45`)/previous-deployment (`9ce7d3f69`) startup scenarios passed on SQLite, MySQL and PostgreSQL. Each baseline and merged version starts at least twice. Main/log markers, existing indexes/constraints, 70,004-byte plugin source and the new audit index column order survived; legacy token quota-query access remains false. Separate MySQL/PostgreSQL log databases were included.
+- Frontend typecheck/build passed; all 199 test files and 2,368 tests passed. All seven locale files retain the 22 fork keys and every upstream key/value unchanged.
+- Reused the real idle-runtime probe across all nine engine/mode combinations: initial options/channel/plugin loading, chat relay and queued billing flush passed. Each 65-second idle observation recorded `true/false/unset` SQL counts: SQLite `0/340/342`, MySQL `0/332/342`, PostgreSQL `0/332/340`. These are bounded observations, not an indefinite zero-SQL guarantee.
+- The disposable idle probe initially sent SIGTERM immediately upon seeing the SQLite startup log, before the unchanged startup signal handler was registered. Requiring a successful HTTP readiness probe, as in the existing startup matrix, fixed that harness race; all three SQLite modes passed on rerun. No production shutdown change or arbitrary timing workaround was added.
+
+### Other things that user need to note
+- The user-authorized disk cleanup used official Go/pip/npm cache commands only under `/root`; available space rose from approximately 3.5 GiB to 5.5 GiB before subsequent builds. Source, credentials, configuration and history were not removed. No cleanup outside the home directory was performed.
+- The existing `.github.env`, `task_mitigate_db_access.md` and other untracked workspace files remain outside this commit. Test scripts, scratch databases and private logs are under `/tmp/new-api-sync-20261018`, not the repository or Docker context.
+- Security regression coverage retains the existing scope/role/expiry/revocation/session checks. References: [OWASP ASVS 5.0.0](https://owasp.org/www-project-application-security-verification-standard/), [Authentication Cheat Sheet](https://cheatsheetseries.owasp.org/cheatsheets/Authentication_Cheat_Sheet.html), [Session Management Cheat Sheet](https://cheatsheetseries.owasp.org/cheatsheets/Session_Management_Cheat_Sheet.html). No new authentication flow or full-project ASVS compliance claim is made.
+- Local ctx history search remains unavailable; supplied context, Git history and existing implementation notes were used.
+
 ## 2026-10-07 idle database mode
 
 ### Design decisions
