@@ -20,6 +20,7 @@ import i18n from 'i18next'
 import LanguageDetector from 'i18next-browser-languagedetector'
 import { initReactI18next } from 'react-i18next'
 
+import fallbackModels from './fallback-models.json'
 import { convertDetectedLanguage } from './languages'
 import en from './locales/en.json'
 import fr from './locales/fr.json'
@@ -30,13 +31,14 @@ import zhTW from './locales/zh-TW.json'
 import zhCN from './locales/zh.json'
 
 export const resources = {
-  en,
-  zhCN,
-  fr,
-  ru,
-  ja,
-  vi,
-  zhTW,
+  // Keep fork-only copy outside upstream locale files; upstream keys take precedence.
+  en: { translation: { ...fallbackModels.en, ...en.translation } },
+  zhCN: { translation: { ...fallbackModels.zhCN, ...zhCN.translation } },
+  fr: { translation: { ...fallbackModels.fr, ...fr.translation } },
+  ru: { translation: { ...fallbackModels.ru, ...ru.translation } },
+  ja: { translation: { ...fallbackModels.ja, ...ja.translation } },
+  vi: { translation: { ...fallbackModels.vi, ...vi.translation } },
+  zhTW: { translation: { ...fallbackModels.zhTW, ...zhTW.translation } },
 } as const
 
 i18n

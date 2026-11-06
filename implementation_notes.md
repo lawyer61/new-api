@@ -1,5 +1,59 @@
 # Implementation Notes
 
+## 2026-11-06 upstream sync and conflict reduction
+
+### Design decisions
+- Fast-forwarded local `main` to the existing automatic-sync commit `3ac0d3ab4` before merging canonical `QuantumNous/new-api` at `e03439033238722c0b8d4437a052445f3aeeed83`. Preserve history and existing fallback/idle-mode behavior; do not replace conflicts with a blanket ours/theirs strategy.
+- The failed scheduled run [42206220705](https://github.com/lawyer61/new-api/actions/runs/42206220705) reports eight source conflicts: seven locale files and `model/audit_log_test.go`. The sync token now works; this is not the previous workflow-permission failure.
+- Move the 22 existing fork-only translations per language into one separate resource, loaded at the existing i18n initialization point. Keep all seven upstream locale files byte-identical to upstream, including ordering. Existing values are copied, not retranslated; upstream translations take precedence if keys overlap in the future. No new UI components or interaction implementations.
+- Adopt upstream's ordered PostgreSQL query for the audit ordering index. Retain the existing fork's ordered before/after snapshots for the other composite indexes; GORM metadata order cannot prove their column order. Do not change production indexes, migrations or drivers to make tests pass.
+
+### Modules
+- `web/src/i18n/fallback-models.json`: existing seven-language fallback-model copy, isolated from upstream language-file churn.
+- `web/src/i18n/config.ts`: combines fork copy with upstream translations at initialization, using existing interface language codes.
+- `web/src/i18n/__tests__/fallback-models.test.ts`: seven-language loading without English fallback and interface-language switching; allows upstream translations to take precedence.
+- `model/audit_log_test.go`: preserves both upstream's index fix and existing ordered-index preservation coverage.
+- Existing fallback route registration, scope checks, public/target model separation and `IDLE_DB_MODE` guards remain at their existing seams; no workflow or business-logic redesign.
+
+### How to run
+```bash
+# Toolchain baseline: root/tokenkit Go 1.26.10; relaykit Go 1.25.1; Bun 1.4.4.
+env -u GOROOT GOWORK=off go vet ./...
+env -u GOROOT GOWORK=off go build ./...
+env -u GOROOT GOWORK=off make test
+(cd relaykit && env -u GOROOT GOWORK=off go vet ./... && env -u GOROOT GOWORK=off go build ./...)
+(cd tokenkit && env -u GOROOT GOWORK=off go vet ./... && env -u GOROOT GOWORK=off go build ./...)
+(cd web && bun install --frozen-lockfile && bun check -b && bun run test -- --maxWorkers=3 && bun run build && bun run i18n:sync)
+/root/.local/bin/actionlint .github/workflows/upstream-sync-and-ghcr.yml
+# Private isolated local test databases, not deployment data.
+source /tmp/new-api-sync-20261106/env.sh
+TEST_MYSQL_DSN="$MYSQL_MODEL_DSN" TEST_POSTGRES_DSN="$POSTGRES_MODEL_DSN" env -u GOROOT GOWORK=off go test -count=1 ./model
+TEST_MYSQL_DSN="$MYSQL_CONTROLLER_DSN" TEST_POSTGRES_DSN="$POSTGRES_CONTROLLER_DSN" AUDIT_MYSQL_DSN="$MYSQL_CONTROLLER_DSN" AUDIT_POSTGRES_DSN="$POSTGRES_CONTROLLER_DSN" env -u GOROOT GOWORK=off go test -count=1 ./controller -run '(DatabaseMatrix|Migration)'
+python3 /tmp/new-api-sync-20261106/verify_idle.py
+```
+
+### Implemented
+- Resolved all eight conflicted files without dropping upstream updates or fork fallback settings/routing.
+- Removed all fork translation edits from the seven upstream locale files; the temporary `add-missing-keys.mjs` migration script was removed after normalization through `bun run i18n:sync`.
+- Reused the existing PAT-backed sync and single push-triggered image publication path. No credentials or local test artifacts are added to Git or `.gitignore`.
+
+### Not implemented / known limitations
+- Future genuine source conflicts still require review. Translation isolation reduces recurring conflicts; it does not promise conflict-free merges.
+- Relative to the current remote fork baseline `3ac0d3ab4`, this update adds no relational schema, migration or GORM/driver changes. Database behavior changes are exercised on all three engines; no new release-upgrade migration was introduced to validate.
+- No new authentication mechanism or full-project ASVS compliance claim. Preserve server-side scope, role, expiry/revocation/session controls, including upstream's new cache-integrity checks. References: [OWASP ASVS 5.0.0](https://asvs.owasp.org/), [Authentication Cheat Sheet](https://cheatsheetseries.owasp.org/cheatsheets/Authentication_Cheat_Sheet.html), [Session Management Cheat Sheet](https://cheatsheetseries.owasp.org/cheatsheets/Session_Management_Cheat_Sheet.html).
+
+### Observed results
+- Root vet/build and all three modules' test suites passed; independent module vet/build passed, including relaykit on its declared Go 1.25.1 baseline. Final audit test and model vet passed after the conflict resolution.
+- Bun frozen install, native typecheck (1,415 files), targeted lint/format and production build passed. All 204 frontend test files / 2,498 tests passed. The new translation regression first failed all eight cases without resource wiring, then passed after wiring.
+- SQLite 3.50.4, MySQL 8.0.46-0ubuntu0.24.04.4 and PostgreSQL 16.15-0ubuntu0.24.04.1: full model matrix passed (26.390s), controller database/migration matrices passed (53.775s), and final audit fresh/upgrade cases passed on each engine, preserving data, uniqueness and ordered indexes.
+- All seven base locale files are byte-identical to the pinned upstream; all 154 fork translation values match the previous fork exactly. i18n sync has no missing/extra keys; workflow actionlint and Git whitespace checks passed.
+- All nine actual-process idle-mode scenarios passed: persisted options/plugins/channels loaded, chat relay succeeded and queued billing reached the database. During each 65-second idle window, SQL counts for true/false/unset were SQLite `0/337/342`, MySQL `0/337/342`, PostgreSQL `0/342/342`; these are bounded observations, not an indefinite zero-SQL guarantee. Separate MySQL/PostgreSQL log databases were included. Private traces are under `/tmp/new-api-sync-20261106`.
+
+### Other things that user need to note
+- Bun 1.4.4 (matching upstream Docker) was installed outside the repository because the previous Bun 1.4.0 lacks `bun check`; no package-manager migration or dependency metadata rewrite.
+- Local ctx history search remains unavailable (no verified index/importable source); Git history and existing notes supplied the prior decisions.
+- `.github.env`, `task_mitigate_db_access.md`, the pre-existing root npm files/directory and core dump remain untracked and uncommitted. `.github.env` and the analysis file were not added to `.gitignore`.
+
 ## 2026-10-18 upstream sync and automation repair
 
 ### Design decisions
